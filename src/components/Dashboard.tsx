@@ -1,0 +1,623 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Activity, BarChart3, Clock, Coins, History, LayoutDashboard, Plus, RefreshCw, Save, Target, Trash2 } from "lucide-react";
+import type { Allocation, PortfolioState } from "@/lib/types";
+
+const navItems = [
+  { id: "portfolio", label: "พอร์ตปัจจุบัน", icon: LayoutDashboard },
+  { id: "targets", label: "สัดส่วนเป้าหมาย", icon: Target },
+  { id: "advice", label: "คำแนะนำปรับพอร์ต", icon: BarChart3 },
+  { id: "monthly", label: "ปรับพอร์ตรายเดือน", icon: Activity },
+  { id: "history", label: "ประวัติ", icon: History }
+] as const;
+
+type ViewId = (typeof navItems)[number]["id"];
+type CoinForm = {
+  symbol: string;
+  date: string;
+  time: string;
+  amount: string;
+  targetPercent: string;
+  feePercent: string;
+};
+
+const emptyState: PortfolioState = {
+  rows: [],
+  allocations: [],
+  snapshots: [],
+  rebalanceHistory: [],
+  summary: {
+    totalValueThb: 0,
+    totalValueUsdt: 0,
+    coinCount: 0,
+    updatedAt: "",
+    totalBuyThb: 0,
+    totalSellThb: 0,
+    healthScore: 0,
+    status: "ไม่ต้องปรับพอร์ต"
+  },
+  usdThb: 36
+};
+
+function formatThb(value: number) {
+  return new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatUsdt(value: number) {
+  return `${new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(value)} USDT`;
+}
+
+function formatAmount(value: number) {
+  return new Intl.NumberFormat("th-TH", { maximumFractionDigits: 6 }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat("th-TH", { maximumFractionDigits: 2 }).format(value)}%`;
+}
+
+function formatDate(value: string) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+export default function Dashboard() {
+  const [active, setActive] = useState<ViewId>("portfolio");
+  const [data, setData] = useState<PortfolioState>(emptyState);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [coinForm, setCoinForm] = useState({
+    symbol: "",
+    date: new Date().toISOString().slice(0, 10),
+    time: "09:00",
+    amount: "",
+    targetPercent: "",
+    feePercent: "0.1"
+  });
+
+  async function loadPortfolio() {
+    setLoading(true);
+    const response = await fetch("/api/portfolio", { cache: "no-store" });
+    const next = (await response.json()) as PortfolioState;
+    setData(next);
+    setAllocations(next.allocations);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadPortfolio().catch(() => {
+      setMessage("โหลดข้อมูลไม่สำเร็จ");
+      setLoading(false);
+    });
+  }, []);
+
+  const allocationSum = useMemo(() => allocations.reduce((sum, item) => sum + Number(item.targetPercent), 0), [allocations]);
+  const buyRows = data.rows.filter((row) => row.action === "BUY" && row.buyThb > 0);
+  const sellRows = data.rows.filter((row) => row.action === "SELL" && row.sellThb > 0);
+
+  async function addCoin(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("กำลังบันทึกเหรียญ");
+    const response = await fetch("/api/holdings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...coinForm,
+        amount: Number(coinForm.amount),
+        targetPercent: Number(coinForm.targetPercent),
+        feePercent: Number(coinForm.feePercent)
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      setMessage(error.message ?? "บันทึกไม่สำเร็จ");
+      return;
+    }
+    setCoinForm({ ...coinForm, symbol: "", amount: "", targetPercent: "" });
+    setMessage("บันทึกเหรียญแล้ว");
+    await loadPortfolio();
+  }
+
+  async function saveAllocations() {
+    setMessage("กำลังบันทึกสัดส่วน");
+    const response = await fetch("/api/allocations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allocations })
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      setMessage(error.message ?? "บันทึกไม่สำเร็จ");
+      return;
+    }
+    setMessage("บันทึกสัดส่วนแล้ว");
+    await loadPortfolio();
+  }
+
+  async function generateRebalance() {
+    setMessage("สร้าง snapshot รายเดือนแล้ว");
+    await fetch("/api/snapshots", { method: "POST" });
+    await loadPortfolio();
+    setActive("monthly");
+  }
+
+  return (
+    <div className="min-h-screen bg-ink text-slate-100">
+      <div className="flex min-h-screen flex-col lg:flex-row">
+        <aside className="border-b border-line bg-[#0b1016] lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:border-b-0 lg:border-r">
+          <div className="flex h-full flex-col gap-6 p-4 lg:p-6">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded bg-teal/15 text-teal">
+                <Coins size={22} />
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold leading-tight">ปรับพอร์ต</h1>
+                <p className="text-xs text-muted">รายเดือน</p>
+              </div>
+            </div>
+
+            <nav className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+              {navItems.map((item, index) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => setActive(item.id)}
+                    className={`flex min-h-11 items-center gap-3 rounded px-3 text-left text-sm transition ${
+                      active === item.id ? "bg-panel2 text-white ring-1 ring-line" : "text-slate-400 hover:bg-panel hover:text-white"
+                    }`}
+                    title={item.label}
+                  >
+                    <Icon size={18} />
+                    <span className="truncate">{index + 1} {item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="mt-auto hidden rounded border border-line bg-panel p-4 lg:block">
+              <p className="text-xs text-muted">USDTHB</p>
+              <p className="mt-1 text-2xl font-semibold">{data.usdThb.toFixed(2)}</p>
+            </div>
+          </div>
+        </aside>
+
+        <main className="flex-1 p-4 lg:p-8">
+          <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-2xl font-semibold">{navItems.find((item) => item.id === active)?.label}</h2>
+              <p className="mt-1 text-sm text-muted">ภาษาไทย • Dark Mode • Single User</p>
+            </div>
+            <div className="flex items-center gap-3">
+              {message ? <span className="text-sm text-amber">{message}</span> : null}
+              <button
+                onClick={loadPortfolio}
+                className="inline-flex min-h-10 items-center gap-2 rounded border border-line bg-panel px-3 text-sm text-slate-200 hover:bg-panel2"
+                title="อัปเดตข้อมูล"
+              >
+                <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+                อัปเดต
+              </button>
+            </div>
+          </div>
+
+          {active === "portfolio" ? (
+            <PortfolioPage data={data} coinForm={coinForm} setCoinForm={setCoinForm} addCoin={addCoin} />
+          ) : null}
+          {active === "targets" ? (
+            <TargetsPage allocations={allocations} setAllocations={setAllocations} allocationSum={allocationSum} saveAllocations={saveAllocations} />
+          ) : null}
+          {active === "advice" ? <AdvicePage data={data} /> : null}
+          {active === "monthly" ? (
+            <MonthlyPage data={data} buyRows={buyRows} sellRows={sellRows} generateRebalance={generateRebalance} />
+          ) : null}
+          {active === "history" ? <HistoryPage data={data} /> : null}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, tone = "" }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded border border-line bg-panel p-4">
+      <p className="text-xs text-muted">{label}</p>
+      <p className={`mt-2 text-xl font-semibold ${tone}`}>{value}</p>
+    </div>
+  );
+}
+
+function PortfolioPage({
+  data,
+  coinForm,
+  setCoinForm,
+  addCoin
+}: {
+  data: PortfolioState;
+  coinForm: CoinForm;
+  setCoinForm: React.Dispatch<React.SetStateAction<CoinForm>>;
+  addCoin: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <div className="grid gap-6">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Metric label="มูลค่าพอร์ตรวม THB" value={formatThb(data.summary.totalValueThb)} tone="text-amber" />
+        <Metric label="มูลค่าพอร์ตรวม USDT" value={formatUsdt(data.summary.totalValueUsdt)} />
+        <Metric label="จำนวนเหรียญทั้งหมด" value={`${data.summary.coinCount} เหรียญ`} />
+        <Metric label="อัปเดตล่าสุด" value={formatDate(data.summary.updatedAt)} />
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
+        <Panel title="ตารางพอร์ตปัจจุบัน">
+          <PortfolioTable data={data} />
+        </Panel>
+
+        <Panel title="เพิ่มเหรียญ">
+          <form className="grid gap-3" onSubmit={addCoin}>
+            {[
+              ["symbol", "Symbol", "ETH"],
+              ["date", "Date", ""],
+              ["time", "Time", ""],
+              ["amount", "Amount", "0.5"],
+              ["targetPercent", "Target %", "18"],
+              ["feePercent", "Fee %", "0.1"]
+            ].map(([key, label, placeholder]) => (
+              <label key={key} className="grid gap-1 text-sm text-slate-300">
+                {label}
+                <input
+                  type={key === "date" ? "date" : key === "time" ? "time" : "text"}
+                  value={coinForm[key as keyof CoinForm]}
+                  placeholder={placeholder}
+                  onChange={(event) => setCoinForm({ ...coinForm, [key]: event.target.value })}
+                  className="min-h-10 rounded border border-line bg-[#0c1117] px-3 text-slate-100 outline-none focus:border-teal"
+                />
+              </label>
+            ))}
+            <button className="mt-2 inline-flex min-h-11 items-center justify-center gap-2 rounded bg-teal px-4 text-sm font-semibold text-[#061010] hover:bg-[#5eead4]">
+              <Plus size={17} />
+              บันทึก
+            </button>
+          </form>
+        </Panel>
+      </section>
+    </div>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded border border-line bg-panel">
+      <div className="border-b border-line px-4 py-3">
+        <h3 className="font-semibold">{title}</h3>
+      </div>
+      <div className="p-4">{children}</div>
+    </section>
+  );
+}
+
+function PortfolioTable({ data }: { data: PortfolioState }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[780px] border-collapse text-sm">
+        <thead className="text-left text-xs uppercase text-muted">
+          <tr className="border-b border-line">
+            <th className="py-3 pr-4">ชื่อเหรียญ</th>
+            <th className="py-3 pr-4 text-right">จำนวนเหรียญ</th>
+            <th className="py-3 pr-4 text-right">ราคา Real-time</th>
+            <th className="py-3 pr-4 text-right">มูลค่า USDT</th>
+            <th className="py-3 pr-4 text-right">มูลค่า THB</th>
+            <th className="py-3 text-right">Current %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.length === 0 ? (
+            <tr>
+              <td className="py-4 text-muted" colSpan={6}>
+                พอร์ตว่าง
+              </td>
+            </tr>
+          ) : (
+            data.rows.map((row) => (
+              <tr key={row.id} className="border-b border-line/70 last:border-0">
+                <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
+                <td className="py-3 pr-4 text-right tabular-nums">{formatAmount(row.amount)}</td>
+                <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(row.currentPriceUsd)}</td>
+                <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(row.valueUsd)}</td>
+                <td className="py-3 pr-4 text-right tabular-nums">{formatThb(row.valueThb)}</td>
+                <td className="py-3 text-right tabular-nums">{formatPercent(row.currentPercent)}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function TargetsPage({
+  allocations,
+  setAllocations,
+  allocationSum,
+  saveAllocations
+}: {
+  allocations: Allocation[];
+  setAllocations: (value: Allocation[]) => void;
+  allocationSum: number;
+  saveAllocations: () => void;
+}) {
+  function updateRow(index: number, key: keyof Allocation, value: string) {
+    const next = allocations.map((row, rowIndex) =>
+      rowIndex === index ? { ...row, [key]: key === "targetPercent" ? Number(value) : value } : row
+    );
+    setAllocations(next);
+  }
+
+  return (
+    <Panel title="สัดส่วนเป้าหมาย">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className={allocationSum === 100 ? "text-sm text-green" : "text-sm text-red"}>
+          ผลรวม Target %: {formatPercent(allocationSum)}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setAllocations([...allocations, { id: 0, coin: "", role: "", targetPercent: 0 }])}
+            className="inline-flex min-h-10 items-center gap-2 rounded border border-line bg-panel2 px-3 text-sm"
+          >
+            <Plus size={16} />
+            เพิ่ม
+          </button>
+          <button
+            onClick={saveAllocations}
+            className="inline-flex min-h-10 items-center gap-2 rounded bg-teal px-3 text-sm font-semibold text-[#061010]"
+          >
+            <Save size={16} />
+            บันทึก
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-sm">
+          <thead className="text-left text-xs uppercase text-muted">
+            <tr className="border-b border-line">
+              <th className="py-3 pr-3">Coin</th>
+              <th className="py-3 pr-3">Role</th>
+              <th className="py-3 pr-3">Target %</th>
+              <th className="py-3 text-right">ลบ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allocations.map((row, index) => (
+              <tr key={`${row.id}-${index}`} className="border-b border-line/70">
+                <td className="py-2 pr-3">
+                  <input className="w-full rounded border border-line bg-[#0c1117] px-3 py-2" value={row.coin} onChange={(event) => updateRow(index, "coin", event.target.value)} />
+                </td>
+                <td className="py-2 pr-3">
+                  <input className="w-full rounded border border-line bg-[#0c1117] px-3 py-2" value={row.role} onChange={(event) => updateRow(index, "role", event.target.value)} />
+                </td>
+                <td className="py-2 pr-3">
+                  <input className="w-full rounded border border-line bg-[#0c1117] px-3 py-2" value={row.targetPercent} onChange={(event) => updateRow(index, "targetPercent", event.target.value)} />
+                </td>
+                <td className="py-2 text-right">
+                  <button
+                    onClick={() => setAllocations(allocations.filter((_, rowIndex) => rowIndex !== index))}
+                    className="inline-grid h-9 w-9 place-items-center rounded border border-line text-red hover:bg-red/10"
+                    title="ลบ"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function AdvicePage({ data }: { data: PortfolioState }) {
+  return (
+    <div className="grid gap-6">
+      <section className="grid gap-3 md:grid-cols-2">
+        <Metric label="รวมซื้อ" value={formatThb(data.summary.totalBuyThb)} tone="text-green" />
+        <Metric label="รวมขาย" value={formatThb(data.summary.totalSellThb)} tone="text-red" />
+      </section>
+      <Panel title="คำแนะนำปรับพอร์ต">
+        <AdviceTable data={data} />
+      </Panel>
+    </div>
+  );
+}
+
+function AdviceTable({ data }: { data: PortfolioState }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="text-left text-xs uppercase text-muted">
+          <tr className="border-b border-line">
+            {["Coin", "Amount", "Current %", "Target %", "Drift %", "Action", "Buy Amount", "Sell Amount", "THB Value"].map((head) => (
+              <th key={head} className="py-3 pr-4 text-right first:text-left">
+                {head}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((row) => (
+            <tr key={row.id} className="border-b border-line/70">
+              <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
+              <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
+              <td className="py-3 pr-4 text-right">{formatPercent(row.currentPercent)}</td>
+              <td className="py-3 pr-4 text-right">{formatPercent(row.targetPercent)}</td>
+              <td className="py-3 pr-4 text-right">{formatPercent(row.driftPercent)}</td>
+              <td className="py-3 pr-4 text-right">
+                <span className={`rounded px-2 py-1 text-xs font-semibold ${row.action === "BUY" ? "bg-green/15 text-green" : row.action === "SELL" ? "bg-red/15 text-red" : "bg-slate-500/15 text-slate-300"}`}>
+                  {row.action}
+                </span>
+              </td>
+              <td className="py-3 pr-4 text-right">{formatAmount(row.buyAmount)}</td>
+              <td className="py-3 pr-4 text-right">{formatAmount(row.sellAmount)}</td>
+              <td className="py-3 pr-4 text-right">{formatThb(row.thbValue)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MonthlyPage({
+  data,
+  buyRows,
+  sellRows,
+  generateRebalance
+}: {
+  data: PortfolioState;
+  buyRows: PortfolioState["rows"];
+  sellRows: PortfolioState["rows"];
+  generateRebalance: () => void;
+}) {
+  return (
+    <div className="grid gap-6">
+      <section className="grid gap-4 xl:grid-cols-[320px_1fr]">
+        <div className="rounded border border-line bg-panel p-5">
+          <button
+            onClick={generateRebalance}
+            className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded bg-amber px-4 text-sm font-semibold text-[#140e03]"
+          >
+            <Clock size={17} />
+            Generate Rebalance
+          </button>
+          <div className="mt-5">
+            <p className="text-sm text-muted">Portfolio Health Score</p>
+            <p className="mt-2 text-5xl font-semibold">{data.summary.healthScore}</p>
+            <p className={data.summary.status === "ควรปรับพอร์ต" ? "mt-2 text-red" : "mt-2 text-green"}>{data.summary.status}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <MiniPlan title="ควรขาย" rows={sellRows} kind="sell" />
+          <MiniPlan title="ควรซื้อ" rows={buyRows} kind="buy" />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MiniPlan({ title, rows, kind }: { title: string; rows: PortfolioState["rows"]; kind: "buy" | "sell" }) {
+  return (
+    <Panel title={title}>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[360px] text-sm">
+          <thead className="text-left text-xs uppercase text-muted">
+            <tr className="border-b border-line">
+              <th className="py-3 pr-3">Coin</th>
+              <th className="py-3 pr-3 text-right">Amount</th>
+              <th className="py-3 text-right">THB</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td className="py-4 text-muted" colSpan={3}>
+                  ไม่มีรายการ
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <tr key={row.id} className="border-b border-line/70">
+                  <td className="py-3 pr-3 font-semibold">{row.symbol}</td>
+                  <td className="py-3 pr-3 text-right">{formatAmount(kind === "buy" ? row.buyAmount : row.sellAmount)}</td>
+                  <td className={`py-3 text-right ${kind === "buy" ? "text-green" : "text-red"}`}>
+                    {formatThb(kind === "buy" ? row.buyThb : row.sellThb)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function HistoryPage({ data }: { data: PortfolioState }) {
+  return (
+    <div className="grid gap-6">
+      <Panel title="Snapshot รายเดือน">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="text-left text-xs uppercase text-muted">
+              <tr className="border-b border-line">
+                <th className="py-3 pr-4">วันที่</th>
+                <th className="py-3 pr-4 text-right">มูลค่าพอร์ต</th>
+                <th className="py-3 pr-4">เหรียญที่มีสัดส่วนมากสุด</th>
+                <th className="py-3 pr-4">เหรียญที่ควรซื้อสูงสุด</th>
+                <th className="py-3">เหรียญที่ควรขายสูงสุด</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.snapshots.length === 0 ? (
+                <tr>
+                  <td className="py-4 text-muted" colSpan={5}>
+                    ไม่มีรายการ
+                  </td>
+                </tr>
+              ) : (
+                data.snapshots.map((row) => (
+                  <tr key={row.id} className="border-b border-line/70">
+                    <td className="py-3 pr-4">{formatDate(row.snapshotDate)}</td>
+                    <td className="py-3 pr-4 text-right">{formatThb(row.totalValueThb)}</td>
+                    <td className="py-3 pr-4">{row.topCoin}</td>
+                    <td className="py-3 pr-4">{row.topBuyCoin}</td>
+                    <td className="py-3">{row.topSellCoin}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <Panel title="ประวัติการปรับพอร์ต">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="text-left text-xs uppercase text-muted">
+              <tr className="border-b border-line">
+                <th className="py-3 pr-4">วันที่</th>
+                <th className="py-3 pr-4">เหรียญ</th>
+                <th className="py-3 pr-4">BUY / SELL</th>
+                <th className="py-3 pr-4 text-right">จำนวน</th>
+                <th className="py-3 text-right">มูลค่า THB</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rebalanceHistory.length === 0 ? (
+                <tr>
+                  <td className="py-4 text-muted" colSpan={5}>
+                    ไม่มีรายการ
+                  </td>
+                </tr>
+              ) : (
+                data.rebalanceHistory.map((row) => (
+                  <tr key={row.id} className="border-b border-line/70">
+                    <td className="py-3 pr-4">{formatDate(row.rebalanceDate)}</td>
+                    <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
+                    <td className="py-3 pr-4">
+                      <span className={`rounded px-2 py-1 text-xs font-semibold ${row.action === "BUY" ? "bg-green/15 text-green" : "bg-red/15 text-red"}`}>
+                        {row.action}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
+                    <td className="py-3 text-right">{formatThb(row.valueThb)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
