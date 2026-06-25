@@ -1,0 +1,1 @@
+export const DEFAULT_TRADING_FEE_PERCENT = 0.1;

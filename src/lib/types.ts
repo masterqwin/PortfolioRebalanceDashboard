@@ -6,6 +6,9 @@ export type Holding = {
   feePercent: number;
   entryDateTime: string;
   entryPriceUsd: number;
+  entryPriceThb: number;
+  entryValueUsd: number;
+  entryValueThb: number;
   currentPriceUsd: number;
   currentPriceThb: number;
   updatedAt: string;

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, Clock, Coins, History, LayoutDashboard, Plus, RefreshCw, Save, Target, Trash2 } from "lucide-react";
+import { DEFAULT_TRADING_FEE_PERCENT } from "@/lib/config";
 import type { Allocation, PortfolioState } from "@/lib/types";
 
 const navItems = [
@@ -18,7 +19,6 @@ type CoinForm = {
   date: string;
   time: string;
   amount: string;
-  targetPercent: string;
   feePercent: string;
 };
 
@@ -72,8 +72,7 @@ export default function Dashboard() {
     date: new Date().toISOString().slice(0, 10),
     time: "09:00",
     amount: "",
-    targetPercent: "",
-    feePercent: "0.1"
+    feePercent: String(DEFAULT_TRADING_FEE_PERCENT)
   });
 
   async function loadPortfolio() {
@@ -103,10 +102,10 @@ export default function Dashboard() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...coinForm,
-        amount: Number(coinForm.amount),
-        targetPercent: Number(coinForm.targetPercent),
-        feePercent: Number(coinForm.feePercent)
+        symbol: coinForm.symbol,
+        date: coinForm.date,
+        time: coinForm.time,
+        amount: Number(coinForm.amount)
       })
     });
     if (!response.ok) {
@@ -114,8 +113,9 @@ export default function Dashboard() {
       setMessage(error.message ?? "บันทึกไม่สำเร็จ");
       return;
     }
-    setCoinForm({ ...coinForm, symbol: "", amount: "", targetPercent: "" });
-    setMessage("บันทึกเหรียญแล้ว");
+    const result = await response.json();
+    setCoinForm({ ...coinForm, symbol: "", amount: "" });
+    setMessage(result.warning ?? result.sourceNote ?? "บันทึกเหรียญแล้ว");
     await loadPortfolio();
   }
 
@@ -260,7 +260,6 @@ function PortfolioPage({
               ["date", "Date", ""],
               ["time", "Time", ""],
               ["amount", "Amount", "0.5"],
-              ["targetPercent", "Target %", "18"],
               ["feePercent", "Fee %", "0.1"]
             ].map(([key, label, placeholder]) => (
               <label key={key} className="grid gap-1 text-sm text-slate-300">
@@ -269,8 +268,10 @@ function PortfolioPage({
                   type={key === "date" ? "date" : key === "time" ? "time" : "text"}
                   value={coinForm[key as keyof CoinForm]}
                   placeholder={placeholder}
+                  disabled={key === "feePercent"}
+                  readOnly={key === "feePercent"}
                   onChange={(event) => setCoinForm({ ...coinForm, [key]: event.target.value })}
-                  className="min-h-10 rounded border border-line bg-[#0c1117] px-3 text-slate-100 outline-none focus:border-teal"
+                  className="min-h-10 rounded border border-line bg-[#0c1117] px-3 text-slate-100 outline-none focus:border-teal disabled:cursor-not-allowed disabled:text-muted"
                 />
               </label>
             ))}

@@ -41,6 +41,9 @@ function migrate(client: Database) {
       fee_percent REAL NOT NULL,
       entry_datetime TEXT NOT NULL,
       entry_price_usd REAL NOT NULL,
+      entry_price_thb REAL NOT NULL DEFAULT 0,
+      entry_value_usd REAL NOT NULL DEFAULT 0,
+      entry_value_thb REAL NOT NULL DEFAULT 0,
       current_price_usd REAL NOT NULL,
       current_price_thb REAL NOT NULL,
       updated_at TEXT NOT NULL
@@ -64,6 +67,17 @@ function migrate(client: Database) {
       value_thb REAL NOT NULL
     );
   `);
+  addColumnIfMissing(client, "holdings", "entry_price_thb", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(client, "holdings", "entry_value_usd", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(client, "holdings", "entry_value_thb", "REAL NOT NULL DEFAULT 0");
+}
+
+function addColumnIfMissing(client: Database, table: string, column: string, definition: string) {
+  const columns = client.exec(`PRAGMA table_info(${table})`);
+  const exists = columns[0]?.values.some((row) => row[1] === column);
+  if (!exists) {
+    client.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 function first<T>(client: Database, sql: string, params: SqlValue[] = []) {
@@ -100,6 +114,7 @@ export async function getHoldings(): Promise<Holding[]> {
     client,
     `SELECT id, symbol, amount, target_percent as targetPercent, fee_percent as feePercent,
     entry_datetime as entryDateTime, entry_price_usd as entryPriceUsd,
+    entry_price_thb as entryPriceThb, entry_value_usd as entryValueUsd, entry_value_thb as entryValueThb,
     current_price_usd as currentPriceUsd, current_price_thb as currentPriceThb, updated_at as updatedAt
     FROM holdings ORDER BY symbol`
   );
@@ -109,14 +124,17 @@ export async function upsertHolding(input: Omit<Holding, "id">) {
   const client = await database();
   client.run(
     `INSERT INTO holdings
-    (symbol, amount, target_percent, fee_percent, entry_datetime, entry_price_usd, current_price_usd, current_price_thb, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (symbol, amount, target_percent, fee_percent, entry_datetime, entry_price_usd, entry_price_thb, entry_value_usd, entry_value_thb, current_price_usd, current_price_thb, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(symbol) DO UPDATE SET
       amount = amount + excluded.amount,
       target_percent = excluded.target_percent,
       fee_percent = excluded.fee_percent,
       entry_datetime = excluded.entry_datetime,
       entry_price_usd = excluded.entry_price_usd,
+      entry_price_thb = excluded.entry_price_thb,
+      entry_value_usd = excluded.entry_value_usd,
+      entry_value_thb = excluded.entry_value_thb,
       current_price_usd = excluded.current_price_usd,
       current_price_thb = excluded.current_price_thb,
       updated_at = excluded.updated_at`,
@@ -127,6 +145,9 @@ export async function upsertHolding(input: Omit<Holding, "id">) {
       input.feePercent,
       input.entryDateTime,
       input.entryPriceUsd,
+      input.entryPriceThb,
+      input.entryValueUsd,
+      input.entryValueThb,
       input.currentPriceUsd,
       input.currentPriceThb,
       input.updatedAt
