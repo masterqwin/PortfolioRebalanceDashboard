@@ -15,6 +15,7 @@ const navItems = [
 
 type ViewId = (typeof navItems)[number]["id"];
 type CoinForm = {
+  side: "BUY" | "SELL";
   symbol: string;
   date: string;
   time: string;
@@ -33,6 +34,7 @@ const emptyState: PortfolioState = {
   allocations: [],
   snapshots: [],
   rebalanceHistory: [],
+  transactionHistory: [],
   summary: {
     totalValueThb: 0,
     totalValueUsdt: 0,
@@ -75,6 +77,7 @@ export default function Dashboard() {
   const [allocations, setAllocations] = useState<Allocation[]>([]);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [coinForm, setCoinForm] = useState({
+    side: "BUY" as "BUY" | "SELL",
     symbol: "",
     date: new Date().toISOString().slice(0, 10),
     time: "09:00",
@@ -113,6 +116,7 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         symbol: coinForm.symbol,
+        side: coinForm.side,
         date: coinForm.date,
         time: coinForm.time,
         amount: Number(coinForm.amount)
@@ -125,7 +129,7 @@ export default function Dashboard() {
     }
     const result = await response.json();
     setCoinForm({ ...coinForm, symbol: "", amount: "" });
-    setMessage(result.warning ?? result.sourceNote ?? "บันทึกเหรียญแล้ว");
+    setMessage(result.warning ?? result.sourceNote ?? (coinForm.side === "BUY" ? "บันทึกซื้อแล้ว" : "บันทึกขายแล้ว"));
     await loadPortfolio();
   }
 
@@ -326,6 +330,26 @@ function PortfolioPage({
 
         <Panel title="เพิ่มเหรียญ">
           <form className="grid gap-3" onSubmit={addCoin}>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setCoinForm({ ...coinForm, side: "BUY" })}
+                className={`min-h-10 rounded border px-3 text-sm font-semibold ${
+                  coinForm.side === "BUY" ? "border-green bg-green/15 text-green" : "border-line text-slate-300 hover:bg-panel2"
+                }`}
+              >
+                ซื้อ
+              </button>
+              <button
+                type="button"
+                onClick={() => setCoinForm({ ...coinForm, side: "SELL" })}
+                className={`min-h-10 rounded border px-3 text-sm font-semibold ${
+                  coinForm.side === "SELL" ? "border-red bg-red/15 text-red" : "border-line text-slate-300 hover:bg-panel2"
+                }`}
+              >
+                ขาย
+              </button>
+            </div>
             {[
               ["symbol", "Symbol", "ETH"],
               ["date", "Date", ""],
@@ -346,9 +370,13 @@ function PortfolioPage({
                 />
               </label>
             ))}
-            <button className="mt-2 inline-flex min-h-11 items-center justify-center gap-2 rounded bg-teal px-4 text-sm font-semibold text-[#061010] hover:bg-[#5eead4]">
+            <button
+              className={`mt-2 inline-flex min-h-11 items-center justify-center gap-2 rounded px-4 text-sm font-semibold ${
+                coinForm.side === "BUY" ? "bg-teal text-[#061010] hover:bg-[#5eead4]" : "bg-red text-white hover:bg-[#ff7b7b]"
+              }`}
+            >
               <Plus size={17} />
-              บันทึก
+              {coinForm.side === "BUY" ? "บันทึกซื้อ" : "บันทึกขาย"}
             </button>
           </form>
         </Panel>
@@ -645,8 +673,11 @@ function MonthlyPage({
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded bg-amber px-4 text-sm font-semibold text-[#140e03]"
           >
             <Clock size={17} />
-            Generate Rebalance
+            บันทึก Snapshot / บันทึกรอบปรับพอร์ต
           </button>
+          <p className="mt-3 text-sm leading-6 text-muted">
+            ปุ่มนี้ใช้บันทึกภาพพอร์ตและคำแนะนำ ณ เวลานี้ เพื่อเก็บเป็นประวัติ ไม่ได้ทำการซื้อขายจริง
+          </p>
           <div className="mt-5">
             <p className="text-sm text-muted">Portfolio Health Score</p>
             <p className="mt-2 text-5xl font-semibold">{data.summary.healthScore}</p>
@@ -769,6 +800,49 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                     </td>
                     <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
                     <td className="py-3 text-right">{formatThb(row.valueThb)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <Panel title="ประวัติธุรกรรม">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead className="text-left text-xs uppercase text-muted">
+              <tr className="border-b border-line">
+                <th className="py-3 pr-4">วันที่</th>
+                <th className="py-3 pr-4">เหรียญ</th>
+                <th className="py-3 pr-4">ซื้อ/ขาย</th>
+                <th className="py-3 pr-4 text-right">จำนวน</th>
+                <th className="py-3 pr-4 text-right">ราคา THB</th>
+                <th className="py-3 pr-4 text-right">มูลค่า THB</th>
+                <th className="py-3 text-right">Fee %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.transactionHistory.length === 0 ? (
+                <tr>
+                  <td className="py-4 text-muted" colSpan={7}>
+                    ไม่มีรายการ
+                  </td>
+                </tr>
+              ) : (
+                data.transactionHistory.map((row) => (
+                  <tr key={row.id} className="border-b border-line/70">
+                    <td className="py-3 pr-4">{formatDate(row.transactionDate)}</td>
+                    <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
+                    <td className="py-3 pr-4">
+                      <span className={`rounded px-2 py-1 text-xs font-semibold ${row.side === "BUY" ? "bg-green/15 text-green" : "bg-red/15 text-red"}`}>
+                        {row.side === "BUY" ? "ซื้อ" : "ขาย"}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
+                    <td className="py-3 pr-4 text-right">{formatThb(row.priceThb)}</td>
+                    <td className="py-3 pr-4 text-right">{formatThb(row.valueThb)}</td>
+                    <td className="py-3 text-right">{formatPercent(row.feePercent)}</td>
                   </tr>
                 ))
               )}

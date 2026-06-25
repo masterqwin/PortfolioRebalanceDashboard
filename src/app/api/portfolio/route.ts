@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculatePortfolio } from "@/lib/calculations";
 import { PRICE_CACHE_TTL_MS } from "@/lib/config";
-import { getAllocations, getHoldings, getRebalanceHistory, getSnapshots, updateHoldingPrices } from "@/lib/db";
+import { getAllocations, getHoldings, getRebalanceHistory, getSnapshots, getTransactionHistory, updateHoldingPrices } from "@/lib/db";
 import { getCurrentPrices } from "@/lib/prices";
 
 export const runtime = "nodejs";
@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
     allocations,
     snapshots: await getSnapshots(),
     rebalanceHistory: await getRebalanceHistory(),
+    transactionHistory: await getTransactionHistory(),
     summary: portfolio.summary,
     usdThb,
     priceStatus: {

@@ -1,6 +1,5 @@
 import type { Allocation, Holding, PortfolioRow, PortfolioSummary } from "./types";
-
-const DRIFT_HOLD_THRESHOLD = 1;
+import { REBALANCE_HOLD_THRESHOLD_PERCENT } from "./config";
 
 export function calculatePortfolio(holdings: Holding[], allocations: Allocation[], usdThb: number) {
   const totalValueUsdt = holdings.reduce((sum, item) => sum + item.amount * item.currentPriceUsd, 0);
@@ -15,7 +14,7 @@ export function calculatePortfolio(holdings: Holding[], allocations: Allocation[
     const driftValueThb = targetValueThb - valueThb;
     const currentPercent = totalValueThb > 0 ? (valueThb / totalValueThb) * 100 : 0;
     const driftPercent = currentPercent - targetPercent;
-    const action = Math.abs(driftPercent) <= DRIFT_HOLD_THRESHOLD ? "HOLD" : driftPercent < 0 ? "BUY" : "SELL";
+    const action = Math.abs(driftPercent) <= REBALANCE_HOLD_THRESHOLD_PERCENT ? "HOLD" : driftPercent < 0 ? "BUY" : "SELL";
     const buyThb = action === "BUY" ? Math.max(driftValueThb, 0) : 0;
     const sellThb = action === "SELL" ? Math.max(-driftValueThb, 0) : 0;
 

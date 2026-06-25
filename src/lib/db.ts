@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
-import type { Allocation, Holding, RebalanceHistory, Snapshot } from "./types";
+import type { Allocation, Holding, RebalanceHistory, Snapshot, TransactionHistory } from "./types";
 
 const dbPath = path.join(process.cwd(), "portfolio.db");
 let db: Database | undefined;
@@ -65,6 +65,20 @@ function migrate(client: Database) {
       action TEXT NOT NULL CHECK(action IN ('BUY', 'SELL')),
       amount REAL NOT NULL,
       value_thb REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS transaction_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      transaction_date TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      side TEXT NOT NULL CHECK(side IN ('BUY', 'SELL')),
+      amount REAL NOT NULL,
+      price_usd REAL NOT NULL,
+      price_thb REAL NOT NULL,
+      value_usd REAL NOT NULL,
+      value_thb REAL NOT NULL,
+      fee_percent REAL NOT NULL,
+      created_at TEXT NOT NULL
     );
   `);
   addColumnIfMissing(client, "holdings", "entry_price_thb", "REAL NOT NULL DEFAULT 0");
@@ -206,6 +220,39 @@ export async function deleteHolding(symbol: string) {
   const client = await database();
   client.run("DELETE FROM holdings WHERE symbol = ?", [symbol]);
   persist(client);
+}
+
+export async function addTransactionHistory(input: Omit<TransactionHistory, "id">) {
+  const client = await database();
+  client.run(
+    `INSERT INTO transaction_history
+    (transaction_date, symbol, side, amount, price_usd, price_thb, value_usd, value_thb, fee_percent, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.transactionDate,
+      input.symbol,
+      input.side,
+      input.amount,
+      input.priceUsd,
+      input.priceThb,
+      input.valueUsd,
+      input.valueThb,
+      input.feePercent,
+      input.createdAt
+    ]
+  );
+  persist(client);
+}
+
+export async function getTransactionHistory(): Promise<TransactionHistory[]> {
+  const client = await database();
+  return all<TransactionHistory>(
+    client,
+    `SELECT id, transaction_date as transactionDate, symbol, side, amount,
+    price_usd as priceUsd, price_thb as priceThb, value_usd as valueUsd,
+    value_thb as valueThb, fee_percent as feePercent, created_at as createdAt
+    FROM transaction_history ORDER BY transaction_date DESC, id DESC`
+  );
 }
 
 export async function getAllocations(): Promise<Allocation[]> {

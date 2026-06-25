@@ -39,6 +39,20 @@ export type RebalanceHistory = {
   valueThb: number;
 };
 
+export type TransactionHistory = {
+  id: number;
+  transactionDate: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  amount: number;
+  priceUsd: number;
+  priceThb: number;
+  valueUsd: number;
+  valueThb: number;
+  feePercent: number;
+  createdAt: string;
+};
+
 export type PortfolioRow = Holding & {
   valueUsd: number;
   valueThb: number;
@@ -69,6 +83,7 @@ export type PortfolioState = {
   allocations: Allocation[];
   snapshots: Snapshot[];
   rebalanceHistory: RebalanceHistory[];
+  transactionHistory: TransactionHistory[];
   summary: PortfolioSummary;
   usdThb: number;
   priceStatus?: {
