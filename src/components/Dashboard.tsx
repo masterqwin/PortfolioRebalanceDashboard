@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Activity, BarChart3, Clock, Coins, History, LayoutDashboard, Plus, RefreshCw, Save, Target, Trash2 } from "lucide-react";
+import { buildHumanAdvice } from "@/lib/advice";
 import { DEFAULT_TRADING_FEE_PERCENT } from "@/lib/config";
 import type { Allocation, PortfolioState } from "@/lib/types";
 
@@ -194,6 +195,26 @@ export default function Dashboard() {
     setActive("monthly");
   }
 
+  async function backupDb() {
+    const response = await fetch("/api/backup", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) {
+      setMessage(result.message ?? "สำรองข้อมูลไม่สำเร็จ");
+      return;
+    }
+    setMessage(`สำรองข้อมูลสำเร็จ: ${result.filename}`);
+  }
+
+  async function exportCsv() {
+    const response = await fetch("/api/export", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok) {
+      setMessage(result.message ?? "Export CSV ไม่สำเร็จ");
+      return;
+    }
+    setMessage(`Export CSV สำเร็จ: ${result.files.join(", ")}`);
+  }
+
   return (
     <div className="min-h-screen bg-ink text-slate-100">
       <div className="flex min-h-screen flex-col lg:flex-row">
@@ -243,6 +264,18 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-3">
               {message ? <span className="text-sm text-amber">{message}</span> : null}
+              <button
+                onClick={backupDb}
+                className="inline-flex min-h-10 items-center gap-2 rounded border border-line bg-panel px-3 text-sm text-slate-200 hover:bg-panel2"
+              >
+                Backup DB
+              </button>
+              <button
+                onClick={exportCsv}
+                className="inline-flex min-h-10 items-center gap-2 rounded border border-line bg-panel px-3 text-sm text-slate-200 hover:bg-panel2"
+              >
+                Export CSV
+              </button>
               <button
                 onClick={() => loadPortfolio(true)}
                 className="inline-flex min-h-10 items-center gap-2 rounded border border-line bg-panel px-3 text-sm text-slate-200 hover:bg-panel2"
@@ -603,12 +636,20 @@ function TargetsPage({
 }
 
 function AdvicePage({ data }: { data: PortfolioState }) {
+  const adviceLines = buildHumanAdvice(data.rows);
   return (
     <div className="grid gap-6">
       <section className="grid gap-3 md:grid-cols-2">
         <Metric label="รวมซื้อ" value={formatThb(data.summary.totalBuyThb)} tone="text-green" />
         <Metric label="รวมขาย" value={formatThb(data.summary.totalSellThb)} tone="text-red" />
       </section>
+      <Panel title="สรุปคำแนะนำแบบอ่านง่าย">
+        <div className="grid gap-2 text-sm leading-6 text-slate-200">
+          {adviceLines.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      </Panel>
       <Panel title="คำแนะนำปรับพอร์ต">
         <AdviceTable data={data} />
       </Panel>

@@ -3,4 +3,6 @@ node_modules
 portfolio.db
 work
 outputs
+backups
+exports
 .env*
