@@ -1,4 +1,4 @@
-import { coinGeckoId } from "./coinMap";
+import { coinGeckoId, normalizeSymbol } from "./coinMap";
 
 export type PriceResult = {
   usd: number;
@@ -6,6 +6,8 @@ export type PriceResult = {
   usdThb: number;
   sourceNote?: string;
 };
+
+export type PriceMap = Record<string, PriceResult>;
 
 async function fetchJson(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
@@ -16,16 +18,32 @@ async function fetchJson(url: string, init?: RequestInit) {
 }
 
 export async function getCurrentPrice(symbol: string): Promise<PriceResult> {
-  const id = coinGeckoId(symbol);
-  const data = await fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd,thb`, {
+  const prices = await getCurrentPrices([symbol]);
+  return prices[normalizeSymbol(symbol)];
+}
+
+export async function getCurrentPrices(symbols: string[]): Promise<PriceMap> {
+  if (process.env.COINGECKO_FORCE_ERROR === "1") {
+    throw new Error("CoinGecko request failed: forced");
+  }
+  const uniqueSymbols = Array.from(new Set(symbols.map(normalizeSymbol)));
+  if (uniqueSymbols.length === 0) return {};
+  const idBySymbol = Object.fromEntries(uniqueSymbols.map((symbol) => [symbol, coinGeckoId(symbol)]));
+  const ids = Object.values(idBySymbol).join(",");
+  const data = await fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,thb`, {
     next: { revalidate: 60 }
   });
-  const usd = Number(data[id]?.usd);
-  const thb = Number(data[id]?.thb);
-  if (!usd || !thb) {
-    throw new Error("ไม่สามารถดึงราคาปัจจุบันของเหรียญนี้ได้");
-  }
-  return { usd, thb, usdThb: thb / usd };
+  return Object.fromEntries(
+    uniqueSymbols.map((symbol) => {
+      const id = idBySymbol[symbol];
+      const usd = Number(data[id]?.usd);
+      const thb = Number(data[id]?.thb);
+      if (!usd || !thb) {
+        throw new Error("ไม่สามารถดึงราคาปัจจุบันของเหรียญนี้ได้");
+      }
+      return [symbol, { usd, thb, usdThb: thb / usd }];
+    })
+  );
 }
 
 export async function getHistoricalPrice(symbol: string, isoDateTime: string): Promise<PriceResult> {

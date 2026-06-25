@@ -71,4 +71,10 @@ export type PortfolioState = {
   rebalanceHistory: RebalanceHistory[];
   summary: PortfolioSummary;
   usdThb: number;
+  priceStatus?: {
+    ok: boolean;
+    warning?: string;
+    failedSymbols?: string[];
+    updatedSymbols?: string[];
+  };
 };

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAllocations, upsertHolding } from "@/lib/db";
-import { normalizeSymbol } from "@/lib/coinMap";
-import { DEFAULT_TRADING_FEE_PERCENT } from "@/lib/config";
+import { deleteHolding, getAllocations, getHoldingBySymbol, updateHolding, upsertHolding } from "@/lib/db";
+import { isSupportedSymbol, normalizeSymbol } from "@/lib/coinMap";
+import { DEFAULT_TRADING_FEE_PERCENT, PRICE_CACHE_TTL_MS } from "@/lib/config";
 import { getCurrentPrice, getHistoricalPrice } from "@/lib/prices";
 
 export const runtime = "nodejs";
@@ -16,6 +16,9 @@ export async function POST(request: NextRequest) {
   if (!symbol || !date || !time || !Number.isFinite(amount) || amount <= 0) {
     return NextResponse.json({ message: "ข้อมูลไม่ครบถ้วน" }, { status: 400 });
   }
+  if (!isSupportedSymbol(symbol)) {
+    return NextResponse.json({ message: "ยังไม่รองรับ Symbol นี้ กรุณาเพิ่ม CoinGecko mapping ก่อน" }, { status: 400 });
+  }
 
   const entryDateTime = new Date(`${date}T${time}:00`).toISOString();
   const allocations = await getAllocations();
@@ -26,9 +29,9 @@ export async function POST(request: NextRequest) {
   try {
     historical = await getHistoricalPrice(symbol, entryDateTime);
     current = await getCurrentPrice(symbol);
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { message: "ไม่สามารถดึงราคาย้อนหลังของเหรียญนี้ได้ กรุณาตรวจ Symbol หรือเลือกวันที่ใหม่" },
+      { message: error instanceof Error ? error.message : "ไม่สามารถดึงราคาย้อนหลังของเหรียญนี้ได้ กรุณาตรวจ Symbol หรือเลือกวันที่ใหม่" },
       { status: 400 }
     );
   }
@@ -54,4 +57,73 @@ export async function POST(request: NextRequest) {
     warning: allocation ? null : "เหรียญนี้ยังไม่มีสัดส่วนเป้าหมาย กรุณาเพิ่มในหน้าสัดส่วนเป้าหมาย",
     sourceNote: historical.sourceNote ?? null
   });
+}
+
+export async function PATCH(request: NextRequest) {
+  const body = await request.json();
+  const symbol = normalizeSymbol(String(body.symbol ?? ""));
+  const amount = Number(body.amount);
+  const date = String(body.date ?? "");
+  const time = String(body.time ?? "");
+
+  if (!symbol || !date || !time || !Number.isFinite(amount) || amount <= 0) {
+    return NextResponse.json({ message: "ข้อมูลไม่ครบถ้วน" }, { status: 400 });
+  }
+  if (!isSupportedSymbol(symbol)) {
+    return NextResponse.json({ message: "ยังไม่รองรับ Symbol นี้ กรุณาเพิ่ม CoinGecko mapping ก่อน" }, { status: 400 });
+  }
+
+  const existing = await getHoldingBySymbol(symbol);
+  if (!existing) {
+    return NextResponse.json({ message: "ไม่พบเหรียญในพอร์ต" }, { status: 404 });
+  }
+
+  const entryDateTime = new Date(`${date}T${time}:00`).toISOString();
+  let historical;
+  try {
+    historical = await getHistoricalPrice(symbol, entryDateTime);
+  } catch (error) {
+    return NextResponse.json(
+      { message: error instanceof Error ? error.message : "ไม่สามารถดึงราคาย้อนหลังของเหรียญนี้ได้ กรุณาตรวจ Symbol หรือเลือกวันที่ใหม่" },
+      { status: 400 }
+    );
+  }
+
+  let currentPriceUsd = existing.currentPriceUsd;
+  let currentPriceThb = existing.currentPriceThb;
+  const cacheAge = Date.now() - new Date(existing.updatedAt).getTime();
+  if (!Number.isFinite(cacheAge) || cacheAge > PRICE_CACHE_TTL_MS) {
+    try {
+      const current = await getCurrentPrice(symbol);
+      currentPriceUsd = current.usd;
+      currentPriceThb = current.thb;
+    } catch {
+      currentPriceUsd = existing.currentPriceUsd;
+      currentPriceThb = existing.currentPriceThb;
+    }
+  }
+
+  await updateHolding(
+    symbol,
+    amount,
+    entryDateTime,
+    historical.usd,
+    historical.thb,
+    amount * historical.usd,
+    amount * historical.thb,
+    currentPriceUsd,
+    currentPriceThb,
+    new Date().toISOString()
+  );
+
+  return NextResponse.json({ ok: true, sourceNote: historical.sourceNote ?? null });
+}
+
+export async function DELETE(request: NextRequest) {
+  const symbol = normalizeSymbol(new URL(request.url).searchParams.get("symbol") ?? "");
+  if (!symbol) {
+    return NextResponse.json({ message: "ข้อมูลไม่ครบถ้วน" }, { status: 400 });
+  }
+  await deleteHolding(symbol);
+  return NextResponse.json({ ok: true });
 }

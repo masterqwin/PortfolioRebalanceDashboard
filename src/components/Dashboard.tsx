@@ -21,6 +21,12 @@ type CoinForm = {
   amount: string;
   feePercent: string;
 };
+type EditForm = {
+  symbol: string;
+  amount: string;
+  date: string;
+  time: string;
+};
 
 const emptyState: PortfolioState = {
   rows: [],
@@ -67,6 +73,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [coinForm, setCoinForm] = useState({
     symbol: "",
     date: new Date().toISOString().slice(0, 10),
@@ -75,12 +82,15 @@ export default function Dashboard() {
     feePercent: String(DEFAULT_TRADING_FEE_PERCENT)
   });
 
-  async function loadPortfolio() {
+  async function loadPortfolio(force = false) {
     setLoading(true);
-    const response = await fetch("/api/portfolio", { cache: "no-store" });
+    const response = await fetch(`/api/portfolio${force ? "?force=1" : ""}`, { cache: "no-store" });
     const next = (await response.json()) as PortfolioState;
     setData(next);
     setAllocations(next.allocations);
+    if (next.priceStatus?.warning) {
+      setMessage(next.priceStatus.warning);
+    }
     setLoading(false);
   }
 
@@ -116,6 +126,44 @@ export default function Dashboard() {
     const result = await response.json();
     setCoinForm({ ...coinForm, symbol: "", amount: "" });
     setMessage(result.warning ?? result.sourceNote ?? "บันทึกเหรียญแล้ว");
+    await loadPortfolio();
+  }
+
+  async function saveHoldingEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editForm?.symbol || !editForm.date || !editForm.time || Number(editForm.amount) <= 0) {
+      setMessage("กรุณากรอกข้อมูลให้ครบถ้วนและจำนวนเหรียญต้องมากกว่า 0");
+      return;
+    }
+    const response = await fetch("/api/holdings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        symbol: editForm.symbol,
+        amount: Number(editForm.amount),
+        date: editForm.date,
+        time: editForm.time
+      })
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      setMessage(error.message ?? "บันทึกไม่สำเร็จ");
+      return;
+    }
+    setEditForm(null);
+    setMessage("บันทึกการแก้ไขแล้ว");
+    await loadPortfolio();
+  }
+
+  async function deleteHoldingRow(symbol: string) {
+    if (!window.confirm(`ยืนยันลบเหรียญ ${symbol} ออกจากพอร์ต?`)) return;
+    const response = await fetch(`/api/holdings?symbol=${encodeURIComponent(symbol)}`, { method: "DELETE" });
+    if (!response.ok) {
+      const error = await response.json();
+      setMessage(error.message ?? "ลบไม่สำเร็จ");
+      return;
+    }
+    setMessage("ลบเหรียญแล้ว");
     await loadPortfolio();
   }
 
@@ -192,7 +240,7 @@ export default function Dashboard() {
             <div className="flex items-center gap-3">
               {message ? <span className="text-sm text-amber">{message}</span> : null}
               <button
-                onClick={loadPortfolio}
+                onClick={() => loadPortfolio(true)}
                 className="inline-flex min-h-10 items-center gap-2 rounded border border-line bg-panel px-3 text-sm text-slate-200 hover:bg-panel2"
                 title="อัปเดตข้อมูล"
               >
@@ -203,7 +251,16 @@ export default function Dashboard() {
           </div>
 
           {active === "portfolio" ? (
-            <PortfolioPage data={data} coinForm={coinForm} setCoinForm={setCoinForm} addCoin={addCoin} />
+            <PortfolioPage
+              data={data}
+              coinForm={coinForm}
+              setCoinForm={setCoinForm}
+              addCoin={addCoin}
+              editForm={editForm}
+              setEditForm={setEditForm}
+              saveHoldingEdit={saveHoldingEdit}
+              deleteHoldingRow={deleteHoldingRow}
+            />
           ) : null}
           {active === "targets" ? (
             <TargetsPage allocations={allocations} setAllocations={setAllocations} allocationSum={allocationSum} saveAllocations={saveAllocations} />
@@ -232,12 +289,20 @@ function PortfolioPage({
   data,
   coinForm,
   setCoinForm,
-  addCoin
+  addCoin,
+  editForm,
+  setEditForm,
+  saveHoldingEdit,
+  deleteHoldingRow
 }: {
   data: PortfolioState;
   coinForm: CoinForm;
   setCoinForm: React.Dispatch<React.SetStateAction<CoinForm>>;
   addCoin: (event: React.FormEvent<HTMLFormElement>) => void;
+  editForm: EditForm | null;
+  setEditForm: React.Dispatch<React.SetStateAction<EditForm | null>>;
+  saveHoldingEdit: (event: React.FormEvent<HTMLFormElement>) => void;
+  deleteHoldingRow: (symbol: string) => void;
 }) {
   return (
     <div className="grid gap-6">
@@ -250,7 +315,13 @@ function PortfolioPage({
 
       <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
         <Panel title="ตารางพอร์ตปัจจุบัน">
-          <PortfolioTable data={data} />
+          <PortfolioTable
+            data={data}
+            editForm={editForm}
+            setEditForm={setEditForm}
+            saveHoldingEdit={saveHoldingEdit}
+            deleteHoldingRow={deleteHoldingRow}
+          />
         </Panel>
 
         <Panel title="เพิ่มเหรียญ">
@@ -297,10 +368,30 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function PortfolioTable({ data }: { data: PortfolioState }) {
+function entryDate(rowDate: string) {
+  return new Date(rowDate).toISOString().slice(0, 10);
+}
+
+function entryTime(rowDate: string) {
+  return new Date(rowDate).toISOString().slice(11, 16);
+}
+
+function PortfolioTable({
+  data,
+  editForm,
+  setEditForm,
+  saveHoldingEdit,
+  deleteHoldingRow
+}: {
+  data: PortfolioState;
+  editForm: EditForm | null;
+  setEditForm: React.Dispatch<React.SetStateAction<EditForm | null>>;
+  saveHoldingEdit: (event: React.FormEvent<HTMLFormElement>) => void;
+  deleteHoldingRow: (symbol: string) => void;
+}) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[780px] border-collapse text-sm">
+      <table className="w-full min-w-[980px] border-collapse text-sm">
         <thead className="text-left text-xs uppercase text-muted">
           <tr className="border-b border-line">
             <th className="py-3 pr-4">ชื่อเหรียญ</th>
@@ -309,24 +400,90 @@ function PortfolioTable({ data }: { data: PortfolioState }) {
             <th className="py-3 pr-4 text-right">มูลค่า USDT</th>
             <th className="py-3 pr-4 text-right">มูลค่า THB</th>
             <th className="py-3 text-right">Current %</th>
+            <th className="py-3 pl-4 text-right">จัดการ</th>
           </tr>
         </thead>
         <tbody>
           {data.rows.length === 0 ? (
             <tr>
-              <td className="py-4 text-muted" colSpan={6}>
+              <td className="py-4 text-muted" colSpan={7}>
                 พอร์ตว่าง
               </td>
             </tr>
           ) : (
             data.rows.map((row) => (
               <tr key={row.id} className="border-b border-line/70 last:border-0">
-                <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
-                <td className="py-3 pr-4 text-right tabular-nums">{formatAmount(row.amount)}</td>
-                <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(row.currentPriceUsd)}</td>
-                <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(row.valueUsd)}</td>
-                <td className="py-3 pr-4 text-right tabular-nums">{formatThb(row.valueThb)}</td>
-                <td className="py-3 text-right tabular-nums">{formatPercent(row.currentPercent)}</td>
+                {editForm?.symbol === row.symbol ? (
+                  <td className="py-3 pr-4" colSpan={7}>
+                    <form className="grid gap-3 md:grid-cols-[120px_1fr_1fr_1fr_auto] md:items-end" onSubmit={saveHoldingEdit}>
+                      <div className="font-semibold">{row.symbol}</div>
+                      <label className="grid gap-1 text-xs text-muted">
+                        จำนวนเหรียญ
+                        <input
+                          className="min-h-10 rounded border border-line bg-[#0c1117] px-3 text-sm text-slate-100"
+                          value={editForm.amount}
+                          onChange={(event) => setEditForm({ ...editForm, amount: event.target.value })}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs text-muted">
+                        Date
+                        <input
+                          type="date"
+                          className="min-h-10 rounded border border-line bg-[#0c1117] px-3 text-sm text-slate-100"
+                          value={editForm.date}
+                          onChange={(event) => setEditForm({ ...editForm, date: event.target.value })}
+                        />
+                      </label>
+                      <label className="grid gap-1 text-xs text-muted">
+                        Time
+                        <input
+                          type="time"
+                          className="min-h-10 rounded border border-line bg-[#0c1117] px-3 text-sm text-slate-100"
+                          value={editForm.time}
+                          onChange={(event) => setEditForm({ ...editForm, time: event.target.value })}
+                        />
+                      </label>
+                      <div className="flex gap-2">
+                        <button className="min-h-10 rounded bg-teal px-3 text-sm font-semibold text-[#061010]">บันทึก</button>
+                        <button type="button" className="min-h-10 rounded border border-line px-3 text-sm" onClick={() => setEditForm(null)}>
+                          ยกเลิก
+                        </button>
+                      </div>
+                    </form>
+                  </td>
+                ) : (
+                  <>
+                    <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
+                    <td className="py-3 pr-4 text-right tabular-nums">{formatAmount(row.amount)}</td>
+                    <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(row.currentPriceUsd)}</td>
+                    <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(row.valueUsd)}</td>
+                    <td className="py-3 pr-4 text-right tabular-nums">{formatThb(row.valueThb)}</td>
+                    <td className="py-3 text-right tabular-nums">{formatPercent(row.currentPercent)}</td>
+                    <td className="py-3 pl-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          className="min-h-9 rounded border border-line px-3 text-xs hover:bg-panel2"
+                          onClick={() =>
+                            setEditForm({
+                              symbol: row.symbol,
+                              amount: String(row.amount),
+                              date: entryDate(row.entryDateTime),
+                              time: entryTime(row.entryDateTime)
+                            })
+                          }
+                        >
+                          แก้ไข
+                        </button>
+                        <button
+                          className="min-h-9 rounded border border-line px-3 text-xs text-red hover:bg-red/10"
+                          onClick={() => deleteHoldingRow(row.symbol)}
+                        >
+                          ลบ
+                        </button>
+                      </div>
+                    </td>
+                  </>
+                )}
               </tr>
             ))
           )}

@@ -167,6 +167,47 @@ export async function updateHoldingPrices(rows: { symbol: string; currentPriceUs
   persist(client);
 }
 
+export async function getHoldingBySymbol(symbol: string): Promise<Holding | undefined> {
+  const client = await database();
+  return first<Holding>(
+    client,
+    `SELECT id, symbol, amount, target_percent as targetPercent, fee_percent as feePercent,
+    entry_datetime as entryDateTime, entry_price_usd as entryPriceUsd,
+    entry_price_thb as entryPriceThb, entry_value_usd as entryValueUsd, entry_value_thb as entryValueThb,
+    current_price_usd as currentPriceUsd, current_price_thb as currentPriceThb, updated_at as updatedAt
+    FROM holdings WHERE symbol = ?`,
+    [symbol]
+  );
+}
+
+export async function updateHolding(
+  symbol: string,
+  amount: number,
+  entryDateTime: string,
+  entryPriceUsd: number,
+  entryPriceThb: number,
+  entryValueUsd: number,
+  entryValueThb: number,
+  currentPriceUsd: number,
+  currentPriceThb: number,
+  updatedAt: string
+) {
+  const client = await database();
+  client.run(
+    `UPDATE holdings SET amount = ?, entry_datetime = ?, entry_price_usd = ?, entry_price_thb = ?,
+    entry_value_usd = ?, entry_value_thb = ?, current_price_usd = ?, current_price_thb = ?, updated_at = ?
+    WHERE symbol = ?`,
+    [amount, entryDateTime, entryPriceUsd, entryPriceThb, entryValueUsd, entryValueThb, currentPriceUsd, currentPriceThb, updatedAt, symbol]
+  );
+  persist(client);
+}
+
+export async function deleteHolding(symbol: string) {
+  const client = await database();
+  client.run("DELETE FROM holdings WHERE symbol = ?", [symbol]);
+  persist(client);
+}
+
 export async function getAllocations(): Promise<Allocation[]> {
   const client = await database();
   return all<Allocation>(client, "SELECT id, coin, role, target_percent as targetPercent FROM allocations ORDER BY id");

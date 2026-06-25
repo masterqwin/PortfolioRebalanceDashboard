@@ -13,5 +13,13 @@ export function normalizeSymbol(symbol: string) {
 }
 
 export function coinGeckoId(symbol: string) {
-  return COIN_GECKO_IDS[normalizeSymbol(symbol)] ?? normalizeSymbol(symbol).toLowerCase();
+  const id = COIN_GECKO_IDS[normalizeSymbol(symbol)];
+  if (!id) {
+    throw new Error("ยังไม่รองรับ Symbol นี้ กรุณาเพิ่ม CoinGecko mapping ก่อน");
+  }
+  return id;
+}
+
+export function isSupportedSymbol(symbol: string) {
+  return Boolean(COIN_GECKO_IDS[normalizeSymbol(symbol)]);
 }
