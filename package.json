@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "clear-history": "node scripts/clear-history.mjs",
     "lint": "next lint"
   },
   "dependencies": {

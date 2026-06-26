@@ -792,7 +792,7 @@ function MiniPlan({ title, rows, kind }: { title: string; rows: PortfolioState["
 }
 
 function HistoryPage({ data }: { data: PortfolioState }) {
-  const latestSnapshots = data.snapshots.slice(0, 8);
+  const latestSnapshots = data.snapshots.slice(0, 3);
   const monthlyTransactionRows = data.transactionHistory.filter((row) => isCurrentMonth(row.createdAt));
   const snapshotsAscending = [...data.snapshots].sort((a, b) => new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime());
   const transactionRowsForSnapshot = (snapshotDate: string) => {
