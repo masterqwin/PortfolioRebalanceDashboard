@@ -70,6 +70,16 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+function formatCurrentMonthYear() {
+  return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric" }).format(new Date());
+}
+
+function isCurrentMonth(value: string) {
+  const date = new Date(value);
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+}
+
 export default function Dashboard() {
   const [active, setActive] = useState<ViewId>("portfolio");
   const [data, setData] = useState<PortfolioState>(emptyState);
@@ -714,10 +724,10 @@ function MonthlyPage({
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded bg-amber px-4 text-sm font-semibold text-[#140e03]"
           >
             <Clock size={17} />
-            บันทึก Snapshot / บันทึกรอบปรับพอร์ต
+            บันทึกรอบปรับพอร์ต
           </button>
           <p className="mt-3 text-sm leading-6 text-muted">
-            ปุ่มนี้ใช้บันทึกภาพพอร์ตและคำแนะนำ ณ เวลานี้ เพื่อเก็บเป็นประวัติ ไม่ได้ทำการซื้อขายจริง
+            ใช้บันทึกรอบที่มีการปรับพอร์ตหรืออยากเก็บสถิติ ณ เวลานี้ ระบบไม่ได้ทำการซื้อขายจริง
           </p>
           <div className="mt-5">
             <p className="text-sm text-muted">Portfolio Health Score</p>
@@ -773,35 +783,43 @@ function MiniPlan({ title, rows, kind }: { title: string; rows: PortfolioState["
 }
 
 function HistoryPage({ data }: { data: PortfolioState }) {
+  const latestSnapshots = data.snapshots.slice(0, 8);
+  const monthlyRebalanceRows = data.rebalanceHistory.filter((row) => isCurrentMonth(row.rebalanceDate));
+  const hasRebalanceForSnapshot = (snapshotDate: string) => data.rebalanceHistory.some((row) => row.rebalanceDate === snapshotDate);
+
   return (
     <div className="grid gap-6">
-      <Panel title="Snapshot รายเดือน">
+      <Panel title="ประวัติการปรับพอร์ต">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[980px] text-sm">
             <thead className="text-left text-xs uppercase text-muted">
               <tr className="border-b border-line">
                 <th className="py-3 pr-4">วันที่</th>
-                <th className="py-3 pr-4 text-right">มูลค่าพอร์ต</th>
+                <th className="py-3 pr-4 text-right">มูลค่าพอร์ต THB</th>
                 <th className="py-3 pr-4">เหรียญที่มีสัดส่วนมากสุด</th>
                 <th className="py-3 pr-4">เหรียญที่ควรซื้อสูงสุด</th>
-                <th className="py-3">เหรียญที่ควรขายสูงสุด</th>
+                <th className="py-3 pr-4">เหรียญที่ควรขายสูงสุด</th>
+                <th className="py-3">สถานะ</th>
               </tr>
             </thead>
             <tbody>
-              {data.snapshots.length === 0 ? (
+              {latestSnapshots.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-muted" colSpan={5}>
+                  <td className="py-4 text-muted" colSpan={6}>
                     ไม่มีรายการ
                   </td>
                 </tr>
               ) : (
-                data.snapshots.map((row) => (
+                latestSnapshots.map((row) => (
                   <tr key={row.id} className="border-b border-line/70">
                     <td className="py-3 pr-4">{formatDate(row.snapshotDate)}</td>
                     <td className="py-3 pr-4 text-right">{formatThb(row.totalValueThb)}</td>
                     <td className="py-3 pr-4">{row.topCoin}</td>
                     <td className="py-3 pr-4">{row.topBuyCoin}</td>
-                    <td className="py-3">{row.topSellCoin}</td>
+                    <td className="py-3 pr-4">{row.topSellCoin}</td>
+                    <td className="py-3">
+                      {hasRebalanceForSnapshot(row.snapshotDate) ? "มีคำแนะนำปรับพอร์ต" : "บันทึกสถิติ / ไม่ต้องปรับ"}
+                    </td>
                   </tr>
                 ))
               )}
@@ -810,7 +828,7 @@ function HistoryPage({ data }: { data: PortfolioState }) {
         </div>
       </Panel>
 
-      <Panel title="ประวัติการปรับพอร์ต">
+      <Panel title={`รายงานการปรับพอร์ตประจำเดือน ${formatCurrentMonthYear()}`}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="text-left text-xs uppercase text-muted">
@@ -823,14 +841,14 @@ function HistoryPage({ data }: { data: PortfolioState }) {
               </tr>
             </thead>
             <tbody>
-              {data.rebalanceHistory.length === 0 ? (
+              {monthlyRebalanceRows.length === 0 ? (
                 <tr>
                   <td className="py-4 text-muted" colSpan={5}>
-                    ไม่มีรายการ
+                    เดือนนี้ยังไม่มีรายการปรับพอร์ต
                   </td>
                 </tr>
               ) : (
-                data.rebalanceHistory.map((row) => (
+                monthlyRebalanceRows.map((row) => (
                   <tr key={row.id} className="border-b border-line/70">
                     <td className="py-3 pr-4">{formatDate(row.rebalanceDate)}</td>
                     <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
@@ -841,49 +859,6 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                     </td>
                     <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
                     <td className="py-3 text-right">{formatThb(row.valueThb)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      <Panel title="ประวัติธุรกรรม">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-sm">
-            <thead className="text-left text-xs uppercase text-muted">
-              <tr className="border-b border-line">
-                <th className="py-3 pr-4">วันที่</th>
-                <th className="py-3 pr-4">เหรียญ</th>
-                <th className="py-3 pr-4">ซื้อ/ขาย</th>
-                <th className="py-3 pr-4 text-right">จำนวน</th>
-                <th className="py-3 pr-4 text-right">ราคา THB</th>
-                <th className="py-3 pr-4 text-right">มูลค่า THB</th>
-                <th className="py-3 text-right">Fee %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.transactionHistory.length === 0 ? (
-                <tr>
-                  <td className="py-4 text-muted" colSpan={7}>
-                    ไม่มีรายการ
-                  </td>
-                </tr>
-              ) : (
-                data.transactionHistory.map((row) => (
-                  <tr key={row.id} className="border-b border-line/70">
-                    <td className="py-3 pr-4">{formatDate(row.transactionDate)}</td>
-                    <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
-                    <td className="py-3 pr-4">
-                      <span className={`rounded px-2 py-1 text-xs font-semibold ${row.side === "BUY" ? "bg-green/15 text-green" : "bg-red/15 text-red"}`}>
-                        {row.side === "BUY" ? "ซื้อ" : "ขาย"}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
-                    <td className="py-3 pr-4 text-right">{formatThb(row.priceThb)}</td>
-                    <td className="py-3 pr-4 text-right">{formatThb(row.valueThb)}</td>
-                    <td className="py-3 text-right">{formatPercent(row.feePercent)}</td>
                   </tr>
                 ))
               )}
