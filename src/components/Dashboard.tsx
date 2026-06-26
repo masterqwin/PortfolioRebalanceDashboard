@@ -67,17 +67,23 @@ function formatPercent(value: number) {
 
 function formatDate(value: string) {
   if (!value) return "-";
-  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Bangkok" }).format(new Date(value));
 }
 
 function formatCurrentMonthYear() {
-  return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric" }).format(new Date());
+  return new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric", timeZone: "Asia/Bangkok" }).format(new Date());
+}
+
+function bangkokMonthKey(value: string | Date) {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit", timeZone: "Asia/Bangkok" }).formatToParts(date);
+  const year = parts.find((part) => part.type === "year")?.value ?? "";
+  const month = parts.find((part) => part.type === "month")?.value ?? "";
+  return `${year}-${month}`;
 }
 
 function isCurrentMonth(value: string) {
-  const date = new Date(value);
-  const now = new Date();
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  return bangkokMonthKey(value) === bangkokMonthKey(new Date());
 }
 
 export default function Dashboard() {
@@ -729,6 +735,9 @@ function MonthlyPage({
           <p className="mt-3 text-sm leading-6 text-muted">
             ใช้บันทึกรอบที่มีการปรับพอร์ตหรืออยากเก็บสถิติ ณ เวลานี้ ระบบไม่ได้ทำการซื้อขายจริง
           </p>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            คำแนะนำในหน้านี้เป็นเพียงแผนการปรับพอร์ต หากซื้อ/ขายจริงแล้ว ให้บันทึกธุรกรรมที่หน้าพอร์ตปัจจุบันก่อน แล้วค่อยกดบันทึกรอบปรับพอร์ต
+          </p>
           <div className="mt-5">
             <p className="text-sm text-muted">Portfolio Health Score</p>
             <p className="mt-2 text-5xl font-semibold">{data.summary.healthScore}</p>
@@ -784,8 +793,22 @@ function MiniPlan({ title, rows, kind }: { title: string; rows: PortfolioState["
 
 function HistoryPage({ data }: { data: PortfolioState }) {
   const latestSnapshots = data.snapshots.slice(0, 8);
-  const monthlyRebalanceRows = data.rebalanceHistory.filter((row) => isCurrentMonth(row.rebalanceDate));
-  const hasRebalanceForSnapshot = (snapshotDate: string) => data.rebalanceHistory.some((row) => row.rebalanceDate === snapshotDate);
+  const monthlyTransactionRows = data.transactionHistory.filter((row) => isCurrentMonth(row.createdAt));
+  const snapshotsAscending = [...data.snapshots].sort((a, b) => new Date(a.snapshotDate).getTime() - new Date(b.snapshotDate).getTime());
+  const transactionRowsForSnapshot = (snapshotDate: string) => {
+    const snapshotTime = new Date(snapshotDate).getTime();
+    const snapshotIndex = snapshotsAscending.findIndex((row) => row.snapshotDate === snapshotDate);
+    const previousSnapshotTime = snapshotIndex > 0 ? new Date(snapshotsAscending[snapshotIndex - 1].snapshotDate).getTime() : Number.NEGATIVE_INFINITY;
+    return data.transactionHistory.filter((row) => {
+      const createdTime = new Date(row.createdAt).getTime();
+      return createdTime > previousSnapshotTime && createdTime <= snapshotTime;
+    });
+  };
+  const transactionSummaryForSnapshot = (snapshotDate: string) => {
+    const rows = transactionRowsForSnapshot(snapshotDate);
+    if (rows.length === 0) return "-";
+    return rows.map((row) => `${row.side} ${row.symbol}`).join(", ");
+  };
 
   return (
     <div className="grid gap-6">
@@ -797,15 +820,14 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                 <th className="py-3 pr-4">วันที่</th>
                 <th className="py-3 pr-4 text-right">มูลค่าพอร์ต THB</th>
                 <th className="py-3 pr-4">เหรียญที่มีสัดส่วนมากสุด</th>
-                <th className="py-3 pr-4">เหรียญที่ควรซื้อสูงสุด</th>
-                <th className="py-3 pr-4">เหรียญที่ควรขายสูงสุด</th>
+                <th className="py-3 pr-4">รายการซื้อขายจริงในรอบนั้น</th>
                 <th className="py-3">สถานะ</th>
               </tr>
             </thead>
             <tbody>
               {latestSnapshots.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-muted" colSpan={6}>
+                  <td className="py-4 text-muted" colSpan={5}>
                     ไม่มีรายการ
                   </td>
                 </tr>
@@ -815,10 +837,9 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                     <td className="py-3 pr-4">{formatDate(row.snapshotDate)}</td>
                     <td className="py-3 pr-4 text-right">{formatThb(row.totalValueThb)}</td>
                     <td className="py-3 pr-4">{row.topCoin}</td>
-                    <td className="py-3 pr-4">{row.topBuyCoin}</td>
-                    <td className="py-3 pr-4">{row.topSellCoin}</td>
+                    <td className="py-3 pr-4">{transactionSummaryForSnapshot(row.snapshotDate)}</td>
                     <td className="py-3">
-                      {hasRebalanceForSnapshot(row.snapshotDate) ? "มีคำแนะนำปรับพอร์ต" : "บันทึกสถิติ / ไม่ต้องปรับ"}
+                      {transactionRowsForSnapshot(row.snapshotDate).length > 0 ? "มีการปรับพอร์ตจริง" : "บันทึกสถิติ / ไม่ได้ปรับจริง"}
                     </td>
                   </tr>
                 ))
@@ -837,27 +858,29 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                 <th className="py-3 pr-4">เหรียญ</th>
                 <th className="py-3 pr-4">BUY / SELL</th>
                 <th className="py-3 pr-4 text-right">จำนวน</th>
+                <th className="py-3 pr-4 text-right">ราคา THB</th>
                 <th className="py-3 text-right">มูลค่า THB</th>
               </tr>
             </thead>
             <tbody>
-              {monthlyRebalanceRows.length === 0 ? (
+              {monthlyTransactionRows.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-muted" colSpan={5}>
+                  <td className="py-4 text-muted" colSpan={6}>
                     เดือนนี้ยังไม่มีรายการปรับพอร์ต
                   </td>
                 </tr>
               ) : (
-                monthlyRebalanceRows.map((row) => (
+                monthlyTransactionRows.map((row) => (
                   <tr key={row.id} className="border-b border-line/70">
-                    <td className="py-3 pr-4">{formatDate(row.rebalanceDate)}</td>
+                    <td className="py-3 pr-4">{formatDate(row.createdAt)}</td>
                     <td className="py-3 pr-4 font-semibold">{row.symbol}</td>
                     <td className="py-3 pr-4">
-                      <span className={`rounded px-2 py-1 text-xs font-semibold ${row.action === "BUY" ? "bg-green/15 text-green" : "bg-red/15 text-red"}`}>
-                        {row.action}
+                      <span className={`rounded px-2 py-1 text-xs font-semibold ${row.side === "BUY" ? "bg-green/15 text-green" : "bg-red/15 text-red"}`}>
+                        {row.side === "BUY" ? "ซื้อ" : "ขาย"}
                       </span>
                     </td>
                     <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
+                    <td className="py-3 pr-4 text-right">{formatThb(row.priceThb)}</td>
                     <td className="py-3 text-right">{formatThb(row.valueThb)}</td>
                   </tr>
                 ))
