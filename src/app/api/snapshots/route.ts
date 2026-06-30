@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { calculatePortfolio } from "@/lib/calculations";
-import { addRebalanceHistory, addSnapshot, getAllocations, getHoldings } from "@/lib/db";
+import { addRebalanceHistory, addSnapshot, getAllocations, getCashBalance, getHoldings } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 export async function POST() {
-  const calculated = calculatePortfolio(await getHoldings(), await getAllocations(), 36);
+  const holdings = await getHoldings();
+  const priceSource = holdings.find((item) => item.currentPriceUsd > 0);
+  const usdThb = priceSource ? priceSource.currentPriceThb / priceSource.currentPriceUsd : 36;
+  const calculated = calculatePortfolio(holdings, await getAllocations(), usdThb, await getCashBalance());
   const rows = calculated.rows;
   const now = new Date().toISOString();
   await addSnapshot({

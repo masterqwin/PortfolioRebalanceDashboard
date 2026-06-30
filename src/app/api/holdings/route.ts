@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addTransactionHistory, deleteHolding, getAllocations, getHoldingBySymbol, updateHolding, upsertHolding } from "@/lib/db";
+import { addTransactionHistory, adjustCashBalance, deleteHolding, getAllocations, getHoldingBySymbol, updateHolding, upsertHolding } from "@/lib/db";
 import { isSupportedSymbol, normalizeSymbol } from "@/lib/coinMap";
 import { DEFAULT_TRADING_FEE_PERCENT, PRICE_CACHE_TTL_MS } from "@/lib/config";
 import { getCurrentPrice, getHistoricalPrice } from "@/lib/prices";
@@ -46,13 +46,19 @@ export async function POST(request: NextRequest) {
     );
   }
   const now = new Date().toISOString();
+  const feePercent = DEFAULT_TRADING_FEE_PERCENT;
+  const usdThb = historical.usd > 0 ? historical.thb / historical.usd : 36;
+  const grossUsdt = amount * historical.usd;
+  const feeUsdt = (grossUsdt * feePercent) / 100;
+  const netUsdt = side === "BUY" ? grossUsdt + feeUsdt : grossUsdt - feeUsdt;
+  const cash = await adjustCashBalance(side === "BUY" ? -netUsdt : netUsdt, now);
 
   if (side === "BUY") {
     await upsertHolding({
       symbol,
       amount,
       targetPercent,
-      feePercent: DEFAULT_TRADING_FEE_PERCENT,
+      feePercent,
       entryDateTime,
       entryPriceUsd: historical.usd,
       entryPriceThb: historical.thb,
@@ -89,15 +95,24 @@ export async function POST(request: NextRequest) {
     amount,
     priceUsd: historical.usd,
     priceThb: historical.thb,
-    valueUsd: amount * historical.usd,
-    valueThb: amount * historical.thb,
-    feePercent: DEFAULT_TRADING_FEE_PERCENT,
+    grossValueUsd: grossUsdt,
+    feeUsd: feeUsdt,
+    netValueUsd: netUsdt,
+    valueUsd: netUsdt,
+    valueThb: netUsdt * usdThb,
+    feePercent,
+    cashBalanceAfterUsdt: cash.amountUsdt,
     createdAt: now
   });
 
   return NextResponse.json({
     ok: true,
-    warning: allocation ? null : "เหรียญนี้ยังไม่มีสัดส่วนเป้าหมาย กรุณาเพิ่มในหน้าสัดส่วนเป้าหมาย",
+    warning:
+      side === "BUY" && cash.amountUsdt < 0
+        ? "เงินสด USDT ติดลบ กรุณาตรวจยอดจริง"
+        : allocation
+          ? null
+          : "เหรียญนี้ยังไม่มีสัดส่วนเป้าหมาย กรุณาเพิ่มในหน้าสัดส่วนเป้าหมาย",
     sourceNote: historical.sourceNote ?? null
   });
 }

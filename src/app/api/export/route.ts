@@ -17,7 +17,21 @@ export async function POST() {
 
     const transactions = await getTransactionHistory();
     const transactionCsv = toCsv(
-      ["วันที่", "เหรียญ", "ซื้อ/ขาย", "จำนวน", "ราคา USD", "ราคา THB", "มูลค่า USD", "มูลค่า THB", "Fee %"],
+      [
+        "วันที่",
+        "เหรียญ",
+        "ซื้อ/ขาย",
+        "จำนวน",
+        "ราคา USD",
+        "ราคา THB",
+        "มูลค่า USD",
+        "มูลค่า THB",
+        "Fee %",
+        "Gross USD",
+        "Fee USD",
+        "Net USD",
+        "เงินสด USDT หลังรายการ"
+      ],
       transactions.map((row) => [
         row.transactionDate,
         row.symbol,
@@ -27,7 +41,11 @@ export async function POST() {
         row.priceThb,
         row.valueUsd,
         row.valueThb,
-        row.feePercent
+        row.feePercent,
+        row.grossValueUsd,
+        row.feeUsd,
+        row.netValueUsd,
+        row.cashBalanceAfterUsdt
       ])
     );
 

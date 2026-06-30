@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { calculatePortfolio } from "@/lib/calculations";
 import { PRICE_CACHE_TTL_MS } from "@/lib/config";
-import { getAllocations, getHoldings, getRebalanceHistory, getSnapshots, getTransactionHistory, updateHoldingPrices } from "@/lib/db";
+import { getAllocations, getCashBalance, getHoldings, getRebalanceHistory, getSnapshots, getTransactionHistory, updateHoldingPrices } from "@/lib/db";
 import { getCurrentPrices } from "@/lib/prices";
 
 export const runtime = "nodejs";
@@ -42,9 +42,10 @@ export async function GET(request: NextRequest) {
 
   const refreshedHoldings = await getHoldings();
   const allocations = await getAllocations();
+  const cash = await getCashBalance();
   const priceSource = refreshedHoldings.find((item) => item.currentPriceUsd > 0);
   const usdThb = priceRows[0]?.usdThb ?? (priceSource ? priceSource.currentPriceThb / priceSource.currentPriceUsd : 36);
-  const portfolio = calculatePortfolio(refreshedHoldings, allocations, usdThb);
+  const portfolio = calculatePortfolio(refreshedHoldings, allocations, usdThb, cash);
 
   return NextResponse.json({
     rows: portfolio.rows,
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest) {
     snapshots: await getSnapshots(),
     rebalanceHistory: await getRebalanceHistory(),
     transactionHistory: await getTransactionHistory(),
+    cash,
     summary: portfolio.summary,
     usdThb,
     priceStatus: {

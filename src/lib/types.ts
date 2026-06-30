@@ -39,6 +39,13 @@ export type RebalanceHistory = {
   valueThb: number;
 };
 
+export type PortfolioCash = {
+  id: number;
+  asset: "USDT";
+  amountUsdt: number;
+  updatedAt: string;
+};
+
 export type TransactionHistory = {
   id: number;
   transactionDate: string;
@@ -47,9 +54,13 @@ export type TransactionHistory = {
   amount: number;
   priceUsd: number;
   priceThb: number;
+  grossValueUsd: number;
+  feeUsd: number;
+  netValueUsd: number;
   valueUsd: number;
   valueThb: number;
   feePercent: number;
+  cashBalanceAfterUsdt: number;
   createdAt: string;
 };
 
@@ -70,6 +81,9 @@ export type PortfolioRow = Holding & {
 export type PortfolioSummary = {
   totalValueThb: number;
   totalValueUsdt: number;
+  cashUsdt: number;
+  cashThb: number;
+  cashPercent: number;
   coinCount: number;
   updatedAt: string;
   totalBuyThb: number;
@@ -84,6 +98,7 @@ export type PortfolioState = {
   snapshots: Snapshot[];
   rebalanceHistory: RebalanceHistory[];
   transactionHistory: TransactionHistory[];
+  cash: PortfolioCash;
   summary: PortfolioSummary;
   usdThb: number;
   priceStatus?: {

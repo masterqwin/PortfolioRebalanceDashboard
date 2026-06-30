@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
-import type { Allocation, Holding, RebalanceHistory, Snapshot, TransactionHistory } from "./types";
+import type { Allocation, Holding, PortfolioCash, RebalanceHistory, Snapshot, TransactionHistory } from "./types";
 
 const dbPath = path.join(process.cwd(), "portfolio.db");
 let db: Database | undefined;
@@ -75,15 +75,30 @@ function migrate(client: Database) {
       amount REAL NOT NULL,
       price_usd REAL NOT NULL,
       price_thb REAL NOT NULL,
+      gross_value_usd REAL NOT NULL DEFAULT 0,
+      fee_usd REAL NOT NULL DEFAULT 0,
+      net_value_usd REAL NOT NULL DEFAULT 0,
       value_usd REAL NOT NULL,
       value_thb REAL NOT NULL,
       fee_percent REAL NOT NULL,
+      cash_balance_after_usdt REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS portfolio_cash (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset TEXT NOT NULL UNIQUE,
+      amount_usdt REAL NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
   addColumnIfMissing(client, "holdings", "entry_price_thb", "REAL NOT NULL DEFAULT 0");
   addColumnIfMissing(client, "holdings", "entry_value_usd", "REAL NOT NULL DEFAULT 0");
   addColumnIfMissing(client, "holdings", "entry_value_thb", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(client, "transaction_history", "gross_value_usd", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(client, "transaction_history", "fee_usd", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(client, "transaction_history", "net_value_usd", "REAL NOT NULL DEFAULT 0");
+  addColumnIfMissing(client, "transaction_history", "cash_balance_after_usdt", "REAL NOT NULL DEFAULT 0");
 }
 
 function addColumnIfMissing(client: Database, table: string, column: string, definition: string) {
@@ -120,6 +135,44 @@ function seed(client: Database) {
     ].forEach((row) => client.run("INSERT INTO allocations (coin, role, target_percent) VALUES (?, ?, ?)", row));
   }
 
+  const cashCount = first<{ count: number }>(client, "SELECT COUNT(*) as count FROM portfolio_cash WHERE asset = 'USDT'");
+  if ((cashCount?.count ?? 0) === 0) {
+    client.run("INSERT INTO portfolio_cash (asset, amount_usdt, updated_at) VALUES ('USDT', 0, ?)", [new Date().toISOString()]);
+  }
+}
+
+export async function getCashBalance(): Promise<PortfolioCash> {
+  const client = await database();
+  let cash = first<PortfolioCash>(
+    client,
+    "SELECT id, asset, amount_usdt as amountUsdt, updated_at as updatedAt FROM portfolio_cash WHERE asset = 'USDT'"
+  );
+  if (!cash) {
+    client.run("INSERT INTO portfolio_cash (asset, amount_usdt, updated_at) VALUES ('USDT', 0, ?)", [new Date().toISOString()]);
+    persist(client);
+    cash = first<PortfolioCash>(
+      client,
+      "SELECT id, asset, amount_usdt as amountUsdt, updated_at as updatedAt FROM portfolio_cash WHERE asset = 'USDT'"
+    );
+  }
+  return cash ?? { id: 0, asset: "USDT", amountUsdt: 0, updatedAt: "" };
+}
+
+export async function setCashBalance(amountUsdt: number, updatedAt = new Date().toISOString()) {
+  const client = await database();
+  client.run(
+    `INSERT INTO portfolio_cash (asset, amount_usdt, updated_at) VALUES ('USDT', ?, ?)
+    ON CONFLICT(asset) DO UPDATE SET amount_usdt = excluded.amount_usdt, updated_at = excluded.updated_at`,
+    [amountUsdt, updatedAt]
+  );
+  persist(client);
+}
+
+export async function adjustCashBalance(deltaUsdt: number, updatedAt = new Date().toISOString()) {
+  const cash = await getCashBalance();
+  const nextAmount = cash.amountUsdt + deltaUsdt;
+  await setCashBalance(nextAmount, updatedAt);
+  return { ...cash, amountUsdt: nextAmount, updatedAt };
 }
 
 export async function getHoldings(): Promise<Holding[]> {
@@ -226,8 +279,9 @@ export async function addTransactionHistory(input: Omit<TransactionHistory, "id"
   const client = await database();
   client.run(
     `INSERT INTO transaction_history
-    (transaction_date, symbol, side, amount, price_usd, price_thb, value_usd, value_thb, fee_percent, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    (transaction_date, symbol, side, amount, price_usd, price_thb, gross_value_usd, fee_usd, net_value_usd,
+    value_usd, value_thb, fee_percent, cash_balance_after_usdt, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.transactionDate,
       input.symbol,
@@ -235,9 +289,13 @@ export async function addTransactionHistory(input: Omit<TransactionHistory, "id"
       input.amount,
       input.priceUsd,
       input.priceThb,
+      input.grossValueUsd,
+      input.feeUsd,
+      input.netValueUsd,
       input.valueUsd,
       input.valueThb,
       input.feePercent,
+      input.cashBalanceAfterUsdt,
       input.createdAt
     ]
   );
@@ -250,8 +308,10 @@ export async function getTransactionHistory(): Promise<TransactionHistory[]> {
     client,
     `SELECT id, transaction_date as transactionDate, symbol, side, amount,
     price_usd as priceUsd, price_thb as priceThb, value_usd as valueUsd,
-    value_thb as valueThb, fee_percent as feePercent, created_at as createdAt
-    FROM transaction_history ORDER BY transaction_date DESC, id DESC`
+    gross_value_usd as grossValueUsd, fee_usd as feeUsd, net_value_usd as netValueUsd,
+    value_thb as valueThb, fee_percent as feePercent,
+    cash_balance_after_usdt as cashBalanceAfterUsdt, created_at as createdAt
+    FROM transaction_history ORDER BY created_at DESC, id DESC`
   );
 }
 

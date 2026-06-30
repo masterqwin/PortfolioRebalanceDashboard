@@ -36,9 +36,18 @@ const emptyState: PortfolioState = {
   snapshots: [],
   rebalanceHistory: [],
   transactionHistory: [],
+  cash: {
+    id: 0,
+    asset: "USDT",
+    amountUsdt: 0,
+    updatedAt: ""
+  },
   summary: {
     totalValueThb: 0,
     totalValueUsdt: 0,
+    cashUsdt: 0,
+    cashThb: 0,
+    cashPercent: 0,
     coinCount: 0,
     updatedAt: "",
     totalBuyThb: 0,
@@ -359,9 +368,10 @@ function PortfolioPage({
 }) {
   return (
     <div className="grid gap-6">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <Metric label="มูลค่าพอร์ตรวม THB" value={formatThb(data.summary.totalValueThb)} tone="text-amber" />
         <Metric label="มูลค่าพอร์ตรวม USDT" value={formatUsdt(data.summary.totalValueUsdt)} />
+        <Metric label="เงินสด USDT" value={formatUsdt(data.summary.cashUsdt)} tone={data.summary.cashUsdt < 0 ? "text-red" : "text-teal"} />
         <Metric label="จำนวนเหรียญทั้งหมด" value={`${data.summary.coinCount} เหรียญ`} />
         <Metric label="อัปเดตล่าสุด" value={formatDate(data.summary.updatedAt)} />
       </section>
@@ -487,7 +497,8 @@ function PortfolioTable({
                 พอร์ตว่าง
               </td>
             </tr>
-          ) : (
+          ) : null}
+          {data.rows.length > 0 ? (
             data.rows.map((row) => (
               <tr key={row.id} className="border-b border-line/70 last:border-0">
                 {editForm?.symbol === row.symbol ? (
@@ -521,7 +532,7 @@ function PortfolioTable({
                         />
                       </label>
                       <div className="flex gap-2">
-                        <button className="min-h-10 rounded bg-teal px-3 text-sm font-semibold text-[#061010]">บันทึก</button>
+                        <button className="min-h-10 rounded bg-teal px-3 text-sm font-semibold text-[#061010]">อัปเดต</button>
                         <button type="button" className="min-h-10 rounded border border-line px-3 text-sm" onClick={() => setEditForm(null)}>
                           ยกเลิก
                         </button>
@@ -563,7 +574,16 @@ function PortfolioTable({
                 )}
               </tr>
             ))
-          )}
+          ) : null}
+          <tr className="border-b border-line/70 last:border-0">
+            <td className="py-3 pr-4 font-semibold">USDT / เงินสด</td>
+            <td className="py-3 pr-4 text-right tabular-nums">{formatAmount(data.summary.cashUsdt)}</td>
+            <td className="py-3 pr-4 text-right tabular-nums">1 USDT</td>
+            <td className="py-3 pr-4 text-right tabular-nums">{formatUsdt(data.summary.cashUsdt)}</td>
+            <td className="py-3 pr-4 text-right tabular-nums">{formatThb(data.summary.cashThb)}</td>
+            <td className="py-3 text-right tabular-nums">{formatPercent(data.summary.cashPercent)}</td>
+            <td className="py-3 pl-4 text-right text-muted">HOLD</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -799,15 +819,17 @@ function HistoryPage({ data }: { data: PortfolioState }) {
     const snapshotTime = new Date(snapshotDate).getTime();
     const snapshotIndex = snapshotsAscending.findIndex((row) => row.snapshotDate === snapshotDate);
     const previousSnapshotTime = snapshotIndex > 0 ? new Date(snapshotsAscending[snapshotIndex - 1].snapshotDate).getTime() : Number.NEGATIVE_INFINITY;
-    return data.transactionHistory.filter((row) => {
-      const createdTime = new Date(row.createdAt).getTime();
-      return createdTime > previousSnapshotTime && createdTime <= snapshotTime;
-    });
+    return data.transactionHistory
+      .filter((row) => {
+        const createdTime = new Date(row.createdAt).getTime();
+        return createdTime > previousSnapshotTime && createdTime <= snapshotTime;
+      })
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
   };
   const transactionSummaryForSnapshot = (snapshotDate: string) => {
     const rows = transactionRowsForSnapshot(snapshotDate);
     if (rows.length === 0) return "-";
-    return rows.map((row) => `${row.side} ${row.symbol}`).join(", ");
+    return rows.map((row) => `${row.side} ${row.symbol} ${formatAmount(row.amount)}`).join(", ");
   };
 
   return (
@@ -860,12 +882,14 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                 <th className="py-3 pr-4 text-right">จำนวน</th>
                 <th className="py-3 pr-4 text-right">ราคา THB</th>
                 <th className="py-3 text-right">มูลค่า THB</th>
+                <th className="py-3 text-right">Fee THB</th>
+                <th className="py-3 text-right">เงินสดหลังรายการ</th>
               </tr>
             </thead>
             <tbody>
               {monthlyTransactionRows.length === 0 ? (
                 <tr>
-                  <td className="py-4 text-muted" colSpan={6}>
+                  <td className="py-4 text-muted" colSpan={8}>
                     เดือนนี้ยังไม่มีรายการปรับพอร์ต
                   </td>
                 </tr>
@@ -882,6 +906,8 @@ function HistoryPage({ data }: { data: PortfolioState }) {
                     <td className="py-3 pr-4 text-right">{formatAmount(row.amount)}</td>
                     <td className="py-3 pr-4 text-right">{formatThb(row.priceThb)}</td>
                     <td className="py-3 text-right">{formatThb(row.valueThb)}</td>
+                    <td className="py-3 text-right">{formatThb(row.feeUsd * (row.priceUsd > 0 ? row.priceThb / row.priceUsd : data.usdThb))}</td>
+                    <td className="py-3 text-right">{formatUsdt(row.cashBalanceAfterUsdt)}</td>
                   </tr>
                 ))
               )}

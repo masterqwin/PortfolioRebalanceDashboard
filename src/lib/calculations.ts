@@ -1,11 +1,15 @@
-import type { Allocation, Holding, PortfolioRow, PortfolioSummary } from "./types";
+import type { Allocation, Holding, PortfolioCash, PortfolioRow, PortfolioSummary } from "./types";
 import { REBALANCE_HOLD_THRESHOLD_PERCENT } from "./config";
 
-export function calculatePortfolio(holdings: Holding[], allocations: Allocation[], usdThb: number) {
-  const totalValueUsdt = holdings.reduce((sum, item) => sum + item.amount * item.currentPriceUsd, 0);
-  const totalValueThb = holdings.reduce((sum, item) => sum + item.amount * item.currentPriceThb, 0);
+export function calculatePortfolio(holdings: Holding[], allocations: Allocation[], usdThb: number, cash?: PortfolioCash) {
+  const cashUsdt = cash?.amountUsdt ?? 0;
+  const cashThb = cashUsdt * usdThb;
+  const holdingsValueUsdt = holdings.reduce((sum, item) => sum + item.amount * item.currentPriceUsd, 0);
+  const holdingsValueThb = holdings.reduce((sum, item) => sum + item.amount * item.currentPriceThb, 0);
+  const totalValueUsdt = holdingsValueUsdt + cashUsdt;
+  const totalValueThb = holdingsValueThb + cashThb;
 
-  const rows: PortfolioRow[] = holdings.map((item) => {
+  let rows: PortfolioRow[] = holdings.map((item) => {
     const allocation = allocations.find((entry) => entry.coin === item.symbol);
     const targetPercent = allocation?.targetPercent ?? item.targetPercent ?? 0;
     const valueUsd = item.amount * item.currentPriceUsd;
@@ -34,6 +38,20 @@ export function calculatePortfolio(holdings: Holding[], allocations: Allocation[
     };
   });
 
+  const totalRawBuyThb = rows.reduce((sum, row) => sum + row.buyThb, 0);
+  if (cashThb >= 0 && totalRawBuyThb > cashThb) {
+    const buyScale = totalRawBuyThb > 0 ? cashThb / totalRawBuyThb : 0;
+    rows = rows.map((row) => {
+      if (row.action !== "BUY") return row;
+      const buyThb = row.buyThb * buyScale;
+      return {
+        ...row,
+        buyThb,
+        buyAmount: row.currentPriceThb > 0 ? buyThb / row.currentPriceThb : 0
+      };
+    });
+  }
+
   const totalBuyThb = rows.reduce((sum, row) => sum + row.buyThb, 0);
   const totalSellThb = rows.reduce((sum, row) => sum + row.sellThb, 0);
   const totalAbsoluteDrift = rows.reduce((sum, row) => sum + Math.abs(row.driftPercent), 0);
@@ -42,8 +60,11 @@ export function calculatePortfolio(holdings: Holding[], allocations: Allocation[
   const summary: PortfolioSummary = {
     totalValueThb,
     totalValueUsdt,
+    cashUsdt,
+    cashThb,
+    cashPercent: totalValueThb > 0 ? (cashThb / totalValueThb) * 100 : 0,
     coinCount: holdings.length,
-    updatedAt: holdings.reduce((latest, item) => (item.updatedAt > latest ? item.updatedAt : latest), ""),
+    updatedAt: [cash?.updatedAt ?? "", ...holdings.map((item) => item.updatedAt)].reduce((latest, item) => (item > latest ? item : latest), ""),
     totalBuyThb,
     totalSellThb,
     healthScore,
